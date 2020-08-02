@@ -3,32 +3,49 @@
  */
 class ElementWrapper {
   constructor(type) {
-    this.root = document.createElement(type)
+    this.type = type;
+    this.props = Object.create(null);
+    this.children = [];
+  }
+  get vdom() {
+    return this;
   }
   setAttribute(name, val) {
-    if (name.match(/^on([\s\S]+)$/)) {
-      let eventName = RegExp.$1.replace(/^[\s\S]/, (s) => s.toLowerCase());
-      this.root.addEventListener(eventName, val)
-    }
-    if (name === "className") {
-      name = "class"
-    }
-    this.root.setAttribute(name, val)
+    this.props[name] = val;
   }
-  appendChild(child) {
-    let range = document.createRange();
-    if (this.root.children.length) {
-      range.setStartAfter(this.root.lastChild)
-      range.setEndAfter(this.root.lastChild)
-    } else {
-      range.setStart(this.root, 0)
-      range.setEnd(this.root, 0)
-    }
-    child.mountTo(range)
+  appendChild(vchild) {
+    this.children.push(vchild)
   }
   mountTo(range) {
+    this.range = range
     range.deleteContents();
-    range.insertNode(this.root)
+    let element = document.createElement(this.type);
+
+    for (let name in this.props) {
+      let value = this.props[name];
+      if (name.match(/^on([\s\S]+)$/)) {
+        let eventName = RegExp.$1.replace(/^[\s\S]/, (s) => s.toLowerCase());
+        element.addEventListener(eventName, value)
+      }
+      if (name === "className") {
+        name = "class"
+      }
+      element.setAttribute(name, value)
+    }
+
+    for (const child of this.children) {
+      let range = document.createRange();
+      if (element.children.length) {
+        range.setStartAfter(element.lastChild)
+        range.setEndAfter(element.lastChild)
+      } else {
+        range.setStart(element, 0)
+        range.setEnd(element, 0)
+      }
+      child.mountTo(range)
+    }
+
+    range.insertNode(element)
   }
 }
 
@@ -38,8 +55,15 @@ class ElementWrapper {
 class TextWrapper {
   constructor(text) {
     this.root = document.createTextNode(text)
+    this.type = '#text'
+    this.children = [];
+    this.props = Object.create(null);
   }
-  mountTo(range) { 
+  get vdom() {
+    return this;
+  }
+  mountTo(range) {
+    this.range = range;
     range.deleteContents();
     range.insertNode(this.root)
   }
@@ -51,10 +75,10 @@ class TextWrapper {
 export class Component {
   constructor() {
     this.children = [];
-    // 需要的一切都可以在构造方法中拓展
-    // this.props = {}
-    // 这样创建会少一些默认方法，尽量纯洁
     this.props = Object.create(null);
+  }
+  get type() {
+    return this.constructor.name
   }
   appendChild(children) {
     this.children.push(children)
@@ -62,28 +86,85 @@ export class Component {
   // 将属性注入到实例上，我们也可以在构造方法中额外写一个props
   setAttribute(name, val) {
     this.props[name] = val
+    this[name] = val
   }
   mountTo(range) {
     this.range = range
     this.update();
   }
   update() {
-    let placeholder = document.createComment('temp')
-    let range = document.createRange()
-    range.setStart(this.range.endContainer, this.range.endOffset);
-    range.setEnd(this.range.endContainer, this.range.endOffset);
-    range.insertNode(placeholder)
-    this.range.deleteContents();
-
     let vdom = this.render && this.render();
-    vdom.mountTo(this.range)
+
+    if (this.vdom) {
+      // 更新操作
+      let isSameNode = (node1, node2) => {
+        if (node1.type !== node2.type) {
+          return false;
+        }
+        for (const name in node1.props) {
+          if (typeof node1.props[name] === "function"
+            && typeof node2.props[name] === "function"
+            && node1.props[name].toString() === node2.props[name].toString()) {
+            continue;
+          }
+          if (typeof node1.props[name] === "object"
+            && typeof node2.props[name] === "object"
+            && JSON.stringify(node1.props[name]) === JSON.stringify(node2.props[name])) {
+            continue;
+          }
+          if (node1.props[name] !== node2.props[name]) {
+            return false
+          }
+        }
+        if (Object.keys(node1.props).length !== Object.keys(node2.props).length) {
+          return false
+        }
+        return true;
+      }
+      let isSameTree = (node1, node2) => {
+        if (!isSameNode(node1, node2)) {
+          return false;
+        }
+        if (node1.children.length !== node2.children.length) {
+          return false;
+        }
+        for (let i = 0; i < node1.children.length; i++) {
+          if (!isSameTree(node1.children[i], node2.children[i])) {
+            return false
+          }
+        }
+        return true
+      }
+
+      let replase = (oldTree, newTree) => {
+        if (isSameTree(oldTree, newTree)) {
+          return;
+        }
+        if (!isSameNode(oldTree, newTree)) {
+          newTree.mountTo(oldTree.range)
+        } else {
+          for (let i = 0; i < newTree.children.length; i++) {
+            replase(oldTree.children[i], newTree.children[i])
+          }
+        }
+      }
+      replase(this.vdom, vdom);
+    } else {
+      // 初次挂载
+      vdom.mountTo(this.range)
+    }
+    this.vdom = vdom
   }
   setState(nextState) {
     let merge = (state, nextState) => {
       for (const key in nextState) {
-        if (typeof nextState[key] === 'object') {
-          if (typeof nextState[key] !== 'object') {
-            state[key] = {}
+        if (typeof nextState[key] === 'object' && nextState[key] !== null) {
+          if (typeof state[key] !== 'object') {
+            if (nextState[key] instanceof Array) {
+              state[key] = []
+            } else {
+              state[key] = {};
+            }
           }
           merge(state[key], nextState[key])
         } else {
@@ -121,9 +202,12 @@ export const ToyReact = {
         if (typeof child === 'object' && child instanceof Array) {
           insertChildren(child)
         } else {
+          if (child === null || child === void 0) {
+            child = ''
+          }
           // 在Toy中限制了发挥，实际上可以对更多的类型作出处理
           if (!(child instanceof Component) &&
-            !(child instanceof ElementWrapper)&&
+            !(child instanceof ElementWrapper) &&
             !(child instanceof TextWrapper)) {
             child = String(child)
           }

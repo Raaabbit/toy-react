@@ -6,13 +6,29 @@ class ElementWrapper {
     this.root = document.createElement(type)
   }
   setAttribute(name, val) {
+    if (name.match(/^on([\s\S]+)$/)) {
+      let eventName = RegExp.$1.replace(/^[\s\S]/, (s) => s.toLowerCase());
+      this.root.addEventListener(eventName, val)
+    }
+    if (name === "className") {
+      name = "class"
+    }
     this.root.setAttribute(name, val)
   }
   appendChild(child) {
-    child.mountTo(this.root)
+    let range = document.createRange();
+    if (this.root.children.length) {
+      range.setStartAfter(this.root.lastChild)
+      range.setEndAfter(this.root.lastChild)
+    } else {
+      range.setStart(this.root, 0)
+      range.setEnd(this.root, 0)
+    }
+    child.mountTo(range)
   }
-  mountTo(parent) {
-    parent.appendChild(this.root)
+  mountTo(range) {
+    range.deleteContents();
+    range.insertNode(this.root)
   }
 }
 
@@ -23,8 +39,9 @@ class TextWrapper {
   constructor(text) {
     this.root = document.createTextNode(text)
   }
-  mountTo(parent) {
-    parent.appendChild(this.root)
+  mountTo(range) { 
+    range.deleteContents();
+    range.insertNode(this.root)
   }
 }
 
@@ -35,7 +52,9 @@ export class Component {
   constructor() {
     this.children = [];
     // 需要的一切都可以在构造方法中拓展
-    this.props = {}
+    // this.props = {}
+    // 这样创建会少一些默认方法，尽量纯洁
+    this.props = Object.create(null);
   }
   appendChild(children) {
     this.children.push(children)
@@ -44,9 +63,39 @@ export class Component {
   setAttribute(name, val) {
     this.props[name] = val
   }
-  mountTo(P) {
+  mountTo(range) {
+    this.range = range
+    this.update();
+  }
+  update() {
+    let placeholder = document.createComment('temp')
+    let range = document.createRange()
+    range.setStart(this.range.endContainer, this.range.endOffset);
+    range.setEnd(this.range.endContainer, this.range.endOffset);
+    range.insertNode(placeholder)
+    this.range.deleteContents();
+
     let vdom = this.render && this.render();
-    vdom.mountTo(P)
+    vdom.mountTo(this.range)
+  }
+  setState(nextState) {
+    let merge = (state, nextState) => {
+      for (const key in nextState) {
+        if (typeof nextState[key] === 'object') {
+          if (typeof nextState[key] !== 'object') {
+            state[key] = {}
+          }
+          merge(state[key], nextState[key])
+        } else {
+          state[key] = nextState[key]
+        }
+      }
+    }
+    if (!this.state) {
+      this.state = {}
+    }
+    merge(this.state, nextState)
+    this.update()
   }
 }
 
@@ -89,6 +138,14 @@ export const ToyReact = {
     return element;
   },
   render(vdom, ele) {
-    vdom.mountTo(ele)
+    let range = document.createRange();
+    if (ele.children.length) {
+      range.setStartAfter(ele.lastChild)
+      range.setEndAfter(ele.lastChild)
+    } else {
+      range.setStart(ele, 0)
+      range.setEnd(ele, 0)
+    }
+    vdom.mountTo(range)
   }
 }

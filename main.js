@@ -1,22 +1,46 @@
 import { ToyReact, Component } from './ToyReact'
 
-class TestComponent extends Component{
+class Square extends Component {
+  constructor(props) {
+    super(props);
+    this.state = {
+      value: null
+    }
+  }
   render() {
-  return <span style={this.props.style}>{this.children}</span>
+    return (
+      <button className="square" onClick={()=>{this.setState({value: 'X'})}}>
+        {this.state.value ? this.state.value : this.props.value}
+      </button>
+    )
   }
 }
 
-const FucnComponent = (props, children) => (<div {...props}>{children || ''}</div>)
+class Board extends Component {
+  renderSquare(i) {
+    return <Square value={i} />;
+  }
+  render() {
+    return (
+      <div>
+        <div className="board-row">
+          {this.renderSquare(0)}
+          {this.renderSquare(1)}
+          {this.renderSquare(2)}
+        </div>
+        <div className="board-row">
+          {this.renderSquare(3)}
+          {this.renderSquare(4)}
+          {this.renderSquare(5)}
+        </div>
+        <div className="board-row">
+          {this.renderSquare(6)}
+          {this.renderSquare(7)}
+          {this.renderSquare(8)}
+        </div>
+      </div>
+    );
+  }
+}
 
-let a = (<div>
-  <TestComponent style="color: red;">
-    <div>1</div>
-    <div>2</div>
-    <div>3</div>
-    <FucnComponent style="color: blue;">
-      hello
-    </FucnComponent>
-  </TestComponent>
-</div>)
-
-ToyReact.render(a, document.body)
+ToyReact.render(<Board />, document.body)
